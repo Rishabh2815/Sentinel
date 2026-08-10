@@ -43,14 +43,9 @@ gateway → Prometheus → Grafana (latency, block rate, bot-score distribution)
 ## Running it
 
 ```bash
-docker compose up --build
-```
-
-- Gateway: `http://localhost:8080`
-- ML service: `http://localhost:8000/docs`
-- Mock backend: `http://localhost:9000`
-- Prometheus: `http://localhost:9090`
-- Grafana: `http://localhost:3000` (admin/admin)
+Gateway metrics: http://localhost:8080/metrics
+- Prometheus targets: http://localhost:9090/targets
+- Grafana dashboards: http://localhost:3000/dashboards
 
 ## Load testing
 
