@@ -1,6 +1,6 @@
 # Sentinel
 
-A distributed API gateway written in Go that rate-limits traffic with Redis and scores requests for bot-likelihood using a Python ML microservice.
+A distributed API gateway written in Go. It rate-limits clients with Redis (atomic sliding window) and scores requests for bot-likelihood with a Python ML microservice.
 
 ## Components
 
@@ -8,159 +8,152 @@ A distributed API gateway written in Go that rate-limits traffic with Redis and 
 |---|---|
 | Gateway (Go) | Reverse proxy; applies rate limiting, calls the scorer, blocks or forwards |
 | Redis | Backing store for atomic sliding-window rate limiting |
-| ML scorer (Python, FastAPI, scikit-learn) | Returns a bot score for a request |
+| ML scorer (Python, FastAPI, scikit-learn) | Returns a bot score for a request (gateway timeout budget: 150 ms) |
 | Prometheus + Grafana | Metrics and dashboards |
-| Docker | Containerised local deployment |
+| Docker Compose | Local deployment of the full stack |
 
-> Every number in this README is labelled **Measured**, **Estimated** or **Not verified**. If a result is not backed by a saved artifact in `results/`, it does not appear as a measured claim.
+> Every number below is labelled **Measured** or **Estimated**. Estimated values were not printed by k6 and should not be quoted as measurements.
 
 ---
 
-## Benchmark results
+## Results
 
-All figures below come from a single k6 run. Full conditions are in [Test evidence](#test-evidence).
-
-| Metric | Value | Status |
-|---|---|---|
-| Bot traffic blocked | **99.16%** | Measured (k6) |
-| p95 latency | **< 16 ms** | Measured (k6) |
-| p50 latency | `<FILL from k6 summary>` | Measured |
-| p99 latency | `<FILL from k6 summary>` | Measured |
-| Throughput (req/s) | `<FILL: http_reqs rate>` | Measured |
-| Legitimate traffic wrongly blocked (false positives) | `<FILL: %>` | Measured |
-| Error rate (5xx / timeouts) | `<FILL: http_req_failed>` | Measured |
-
-If you cannot fill a row from the saved k6 output, delete the row rather than leave a placeholder.
-
-### Test conditions
+### Test environment
 
 | Item | Value |
 |---|---|
-| Date of run | `<FILL>` |
-| Machine (CPU / RAM / OS) | `<FILL>` |
-| Deployment | Docker Compose on a single machine (`<FILL: confirm>`) |
-| Gateway instances | `<FILL>` |
-| Redis | `<FILL: version, single node, persistence on/off>` |
-| ML scorer | `<FILL: workers, model file / version>` |
-| k6 runs on same host as the system under test | `<FILL: yes/no>` (if yes, say so; it affects latency) |
-| Upstream/backend behind the gateway | `<FILL: real service or stub, and its response time>` |
+| Load tool | k6 v0.50.0 |
+| OS | Windows 11, run locally |
+| Stack under test | Full Docker Compose stack: gateway + Redis + ML service + mock backend |
+| Machine (CPU / RAM) | `<FILL>` |
+| k6 on same host as the stack | `<FILL: yes/no>` (if yes, results include local contention) |
+
+### Run 1: normal traffic
+
+50 VUs, ramping, human-like request intervals, spoofed per-VU source IPs.
+
+| Metric | Value | Status |
+|---|---|---|
+| Total requests | 2,944 | Measured |
+| Throughput | ~24 req/s | Measured |
+| p90 latency | 12.99 ms | Measured |
+| p95 latency | 15.19 ms | Measured |
+| p99 latency | ~20-25 ms | Estimated (extrapolated from p90/p95; not printed by k6) |
+| Max latency | 132.13 ms | Measured |
+| Legitimate requests blocked (HTTP 429) | `<FILL: count from k6 output>` | Measured |
+
+### Run 2: bot swarm
+
+200 req/s constant arrival rate, 20 rotating source IPs.
+
+| Metric | Value | Status |
+|---|---|---|
+| Total requests | 12,001 | Measured |
+| Throughput | 199.8 req/s (configured rate) | Measured |
+| Blocked (HTTP 429) | 11,901 / 12,001 = 99.17% | Measured |
+| p90 latency (all traffic) | 8.48 ms | Measured |
+| p95 latency (all traffic) | 159.93 ms | Measured |
+| p99 latency (all traffic) | ~200-250 ms | Estimated (not printed by k6) |
+| Max latency | 298.58 ms | Measured |
+
+**Note on the two latency figures.** The sub-16 ms p95 comes from Run 1 (normal traffic). The 99.17% blocked figure comes from Run 2 (bot swarm), where p95 was 159.93 ms. They are separate runs and should be quoted separately.
+
+**Note on 99.16% vs 99.17%.** 11,901 / 12,001 = 99.167%. The earlier results report states 99.16% (truncated); rounded to two decimals it is 99.17%.
 
 ---
 
 ## Test evidence
 
-### Command
+### Commands
 
-```bash
-# Replace with the exact command that produced the numbers above
-k6 run \
-  --summary-export=results/k6-summary.json \
-  <FILL: script path, e.g. loadtest/bot_vs_human.js>
+```powershell
+# Windows (as run)
+k6.exe run loadtest/normal_traffic.js
+k6.exe run loadtest/bot_swarm.js
 ```
 
-Pin the k6 version used: `<FILL: k6 version>`.
+To get p99 printed directly by k6 and save raw output:
 
-### Workload
+```bash
+k6 run \
+  --summary-trend-stats="min,med,avg,p(90),p(95),p(99),max" \
+  --summary-export=results/normal_traffic.json \
+  loadtest/normal_traffic.js
 
-| Item | Value |
-|---|---|
-| Script | `<FILL path>` (committed to the repo) |
-| Traffic mix | `<FILL: e.g. N% bot-labelled, M% legitimate>` |
-| How bot traffic is generated | `<FILL: user agents, request rate per client, header patterns>` |
-| How legitimate traffic is generated | `<FILL>` |
-| Endpoints hit | `<FILL>` |
-| Scenario / executor | `<FILL: constant-vus, ramping-vus, constant-arrival-rate>` |
+k6 run \
+  --summary-trend-stats="min,med,avg,p(90),p(95),p(99),max" \
+  --summary-export=results/bot_swarm.json \
+  loadtest/bot_swarm.js
+```
 
-### Concurrency and volume
+Look for `p(99)=` on the `http_req_duration` line. The p99 values in the tables above should be replaced with these once the runs are repeated.
 
-| Item | Value |
-|---|---|
-| Virtual users (VUs) | `<FILL>` |
-| Duration | `<FILL>` |
-| Total requests | `<FILL: http_reqs count>` |
-| Bot-labelled requests | `<FILL>` |
-| Legitimate requests | `<FILL>` |
+Bring the stack up first:
+
+```bash
+docker compose up --build -d
+```
+
+### Workloads
+
+| | Normal traffic | Bot swarm |
+|---|---|---|
+| Script | `loadtest/normal_traffic.js` | `loadtest/bot_swarm.js` |
+| Load model | 50 VUs, ramping | 200 req/s, constant arrival rate |
+| Client behaviour | Human-like intervals | Flood from 20 rotating source IPs |
+| Source IPs | Spoofed, one per VU | 20, rotating |
+| Requests | 2,944 | 12,001 |
 
 ### How "bot traffic blocked" is calculated
 
 ```
-bot_blocked_pct = (bot-labelled requests that received a block response)
-                  / (all bot-labelled requests sent) x 100
+blocked_pct = requests answered with HTTP 429 / total requests in the bot-swarm run x 100
+            = 11,901 / 12,001
+            = 99.167%
 ```
 
-- A **block response** is `<FILL: status code, e.g. 403 or 429>` returned by the gateway.
-- Requests are labelled as bot or legitimate **by the k6 script** (via a tag or custom counter), not by the gateway's own decision. This keeps ground truth independent of the system being measured.
-- The 99.16% figure is `<FILL: blocked count> / <FILL: bot request count>`.
-- Blocks from the rate limiter and blocks from the ML scorer are `<FILL: counted together / reported separately>`.
+- Every request in the bot-swarm run is bot traffic by construction, so the denominator is all requests.
+- The 429 count comes from k6's `http_req_failed` count.
+- It can be cross-checked against the gateway's own counter: `gateway_requests_total{outcome="blocked"}` on the `/metrics` endpoint.
+- 100 of 12,001 requests were not blocked (12,001 - 11,901).
 
-Suggested k6 counters so the number is reproducible:
+### What this run does and does not show
 
-```javascript
-import { Counter } from 'k6/metrics';
-const botSent = new Counter('bot_sent');
-const botBlocked = new Counter('bot_blocked');
-const humanSent = new Counter('human_sent');
-const humanBlocked = new Counter('human_blocked');
-```
-
-### Artifacts
-
-- `results/k6-summary.json` (raw k6 output)
-- `results/RESULTS.md` (dated run log)
-- Grafana screenshot or Prometheus export for the run window: `<FILL path>`
+- Blocked requests were rejected quickly (p90 8.48 ms) because Redis denies over-limit clients before the request reaches the ML scorer or the backend.
+- The blocked percentage measures **rate-limit enforcement** against a flood. It is not a measure of ML classification accuracy; that is Not verified.
+- The normal-traffic run shows p95 under 16 ms with every request being scored by the ML service under a 150 ms timeout budget.
 
 ---
 
 ## Failure handling
 
-This section separates what has been **tested** (with evidence) from what is **intended** (designed but not exercised). Update the status column only when a test has been run and its output saved.
+"Tested" means there is saved output showing the behaviour. "Intended" means it is how the code is designed to behave but has not been exercised.
 
 | Failure | Intended behaviour | Status | Evidence |
 |---|---|---|---|
-| ML scorer times out | `<FILL: fail-open (forward) or fail-closed (block)>` after `<FILL: timeout ms>` | `<Tested / Intended only>` | `<FILL: test name + output, or "none">` |
-| ML scorer unreachable or returns an error | `<FILL>` | `<Tested / Intended only>` | `<FILL>` |
-| Redis unavailable at request time | `<FILL: fail-open, fail-closed, or in-memory fallback>` | `<Tested / Intended only>` | `<FILL>` |
-| Redis recovers after an outage | `<FILL: does the limiter resume without a gateway restart?>` | `<Tested / Intended only>` | `<FILL>` |
+| ML scorer exceeds its 150 ms timeout | `<FILL: fail-open (forward) or fail-closed (block)>` | `<Tested / Intended only>` | `<FILL: output, or "none">` |
+| ML scorer unreachable or errors | `<FILL>` | `<Tested / Intended only>` | `<FILL>` |
+| Redis unavailable | `<FILL: fail-open, fail-closed, or fallback>` | `<Tested / Intended only>` | `<FILL>` |
+| Redis recovers after an outage | `<FILL: limiter resumes without gateway restart?>` | `<Tested / Intended only>` | `<FILL>` |
 
-### How to test these and record the result
+To test:
 
-**ML scorer timeout**
-1. Add an artificial delay to the scorer longer than the gateway timeout (for example `time.sleep()` in the FastAPI handler).
-2. Send requests through the gateway and record the status codes and latency.
-3. Record: were requests forwarded or blocked, and what was p95 latency while the scorer was slow?
+- **Scorer timeout:** add a delay longer than 150 ms to the FastAPI handler, send requests through the gateway, and record status codes and latency.
+- **Redis down:** run steady k6 load, `docker compose stop redis` mid-run, later `docker compose start redis`, and record responses during the outage and after recovery.
 
-**Redis unavailable**
-1. Start steady load with k6.
-2. Run `docker compose stop redis` mid-run, then `docker compose start redis` later.
-3. Record: response codes during the outage, whether the gateway crashed, and whether limiting resumed after recovery.
-
-### Write the outcome honestly
-
-- If the behaviour was observed: write "Tested: <what happened>" and link the output.
-- If it was only reasoned about from the code: write "Intended, not tested."
-- Fail-open and fail-closed both have tradeoffs. Fail-open keeps legitimate traffic flowing but lets bots through during the outage. Fail-closed protects the backend but turns a Redis outage into a full outage. State which one Sentinel chose and why.
+State which of fail-open and fail-closed Sentinel uses and why. Fail-open keeps legitimate traffic flowing but lets bots through during the outage; fail-closed protects the backend but turns a Redis outage into a full outage.
 
 ---
 
 ## Limitations
 
-- Results come from a single-machine run; they are not a production capacity claim.
-- The ML model was evaluated on `<FILL: synthetic / labelled dataset>`; accuracy on real-world traffic is Not verified.
-- `<FILL: any other known gaps>`
+- Single-machine local run on Windows 11 with Docker; not a production capacity claim.
+- p99 values are estimates until the scripts are rerun with p(99) enabled.
+- The bot-swarm p95 (159.93 ms) is about 19x its p90 (8.48 ms). The cause of the tail is still being investigated; one hypothesis is requests that reached the ML scorer, whose timeout budget is 150 ms.
+- ML bot-detection accuracy on real traffic is Not verified.
+- Failure-handling behaviour is documented above as Intended unless marked Tested.
 
-## Running it
 
-```bash
-docker compose up --build
-# gateway: <FILL port>, Grafana: <FILL port>
-```
-
-## Reproducing the benchmark
-
-```bash
-docker compose up -d
-k6 run --summary-export=results/k6-summary.json <FILL script>
-```
 
 
 
