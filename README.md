@@ -2,6 +2,16 @@
 
 A distributed API gateway written in Go. It rate-limits clients with Redis (atomic sliding window) and scores requests for bot-likelihood with a Python ML microservice.
 
+## Repository layout
+
+```text
+backend/         Mock backend service (FastAPI)
+gateway/         Go API gateway and Redis rate-limit script
+loadtest/        k6 traffic scenarios
+ml-service/      Python ML scoring service
+observability/   Prometheus configuration
+docs/            Architecture diagrams and project report
+```
 ## Components
 
 | Component | Role |
