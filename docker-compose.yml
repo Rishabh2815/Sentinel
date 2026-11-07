@@ -1,48 +1,56 @@
-version: "3.8"
-
 services:
   redis:
     image: redis:7-alpine
-    ports:
-      - "6379:6379"
+    restart: unless-stopped
 
   backend:
     build: ./backend
-    ports:
-      - "9000:9000"
+    restart: unless-stopped
 
   ml-service:
     build: ./ml-service
-    ports:
-      - "8000:8000"
+    restart: unless-stopped
 
   gateway:
     build: ./gateway
     ports:
-      - "8080:8080"
+      - "127.0.0.1:8080:8080"
     environment:
-      - REDIS_ADDR=redis:6379
-      - BACKEND_URL=http://backend:9000
-      - ML_SERVICE_URL=http://ml-service:8000/score
+      REDIS_ADDR: redis:6379
+      BACKEND_URL: http://backend:9000
+      ML_SERVICE_URL: http://ml-service:8000/score
     depends_on:
       - redis
       - backend
       - ml-service
+    restart: unless-stopped
 
   prometheus:
     image: prom/prometheus:latest
     volumes:
-      - ./observability/prometheus.yml:/etc/prometheus/prometheus.yml
-    ports:
-      - "9090:9090"
+      - ./observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
     depends_on:
       - gateway
+    restart: unless-stopped
 
   grafana:
     image: grafana/grafana:latest
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3000:3000"
     environment:
-      - GF_SECURITY_ADMIN_PASSWORD=admin
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?Set GRAFANA_ADMIN_PASSWORD in .env}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      GF_AUTH_ANONYMOUS_HIDE_VERSION: "true"
+    volumes:
+      - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./observability/grafana/dashboards:/etc/grafana/dashboards:ro
+      - grafana_data:/var/lib/grafana
     depends_on:
       - prometheus
+    restart: unless-stopped
+
+volumes:
+  grafana_data:
