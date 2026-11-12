@@ -35,8 +35,6 @@ docs/            Architecture diagrams and project report
 | Load tool | k6 v0.50.0 |
 | OS | Windows 11, run locally |
 | Stack under test | Full Docker Compose stack: gateway + Redis + ML service + mock backend |
-| Machine (CPU / RAM) | `<FILL>` |
-| k6 on same host as the stack | `<FILL: yes/no>` (if yes, results include local contention) |
 
 ### Run 1: normal traffic
 
@@ -50,7 +48,7 @@ docs/            Architecture diagrams and project report
 | p95 latency | 15.19 ms | Measured |
 | p99 latency | ~20-25 ms | Estimated (extrapolated from p90/p95; not printed by k6) |
 | Max latency | 132.13 ms | Measured |
-| Legitimate requests blocked (HTTP 429) | `<FILL: count from k6 output>` | Measured |
+
 
 ### Run 2: bot swarm
 
